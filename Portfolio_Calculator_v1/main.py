@@ -1,5 +1,7 @@
 import yfinance as yf
 from database import create_holdings_table, insert_holdings, get_all_holdings
+import numpy as np
+import pandas as pd
 
 
 def fetch_price(ticker):
@@ -413,6 +415,71 @@ def export_rankings_to_excel(holdings, total_value):
 
     return df
 
+def fetch_historical_data(ticker):
+    stock = yf.Ticker(ticker)
+    data = stock.history(period ="1y")
+    return data
+
+data= fetch_historical_data("APPL")
+data["Daily Return"] = data["close"].pct_change()
+
+print(data[["Close", "Daily Return"]].head())
+
+daily_volatility = data["Daily Return"].std()
+annual_volatility = daily_volatility * (252 ** 0.5)
+
+print("Daily Volatility:", daily_volatility)
+print("Annual Volatility:", annual_volatility)
+
+def calculate_portfolio_1y_return(holdings):
+    total_value = calculate_total_current_value(holdings)
+
+    portfolio_return = 0
+
+    for h in holdings:
+        ticker = h["ticker"]
+
+        # weight (convert to decimal)
+        weight = calculate_weight(h, total_value) / 100
+
+        # fetch 1-year data
+        data = fetch_historical_data(ticker)
+
+        # skip if no data
+        if data.empty:
+            continue
+
+        start_price = data["Close"].iloc[0]
+        end_price = data["Close"].iloc[-1]
+
+        stock_return = (end_price - start_price) / start_price
+
+        portfolio_return += weight * stock_return
+
+    return portfolio_return * 100
+
+def calculate_benchmark_1y_return():
+    data = fetch_historical_data("^GSPC")
+
+    if data.empty:
+        return 0
+
+    start_price = data["Close"].iloc[0]
+    end_price = data["Close"].iloc[-1]
+
+    benchmark_return = (end_price - start_price) / start_price
+
+    return benchmark_return * 100
+
+def compare_portfolio_to_benchmark(holdings):
+    portfolio_return = calculate_portfolio_1y_return(holdings)
+    benchmark_return = calculate_benchmark_1y_return()
+
+    difference = portfolio_return - benchmark_return
+
+    return portfolio_return, benchmark_return, difference
+
+
 def main():
     print("Portfolio Analytics System (V3)")
 
@@ -616,6 +683,14 @@ def main():
 
     rankings_df = export_rankings_to_excel(holdings, total_value)
     print("\nExcel file exported successfully.")
+
+    portfolio_1y, benchmark_1y, diff = compare_portfolio_to_benchmark(holdings)
+
+    print("\n1-Year Benchmark Comparison")
+    print("---------------------------")
+    print(f"Portfolio 1Y Return: {round(portfolio_1y, 2)}%")
+    print(f"S&P 500 1Y Return: {round(benchmark_1y, 2)}%")
+    print(f"Outperformance: {round(diff, 2)}%")
 
     with pd.ExcelWriter("Portfolio_Analytics_System.xlsx") as writer:
         holdings_df.to_excel(writer, sheet_name="Holdings", index=False)
